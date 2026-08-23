@@ -1,0 +1,35 @@
+# Gradle files
+.gradle/
+build/
+*.apk
+*.ap_
+*.dex
+
+# Local configuration file
+local.properties
+
+# Keystore files
+*.jks
+*.keystore
+keystore.b64
+
+# Android Studio
+.idea/
+.classpath
+.cproject
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+.vscode/
+.externalNativeBuild
+.cxx/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+secrets.properties
