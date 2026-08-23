@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Fantopo Metacrtl</string>
+    <string name="app_description">My Android Application</string>
+    <string name="hello">Hello World!</string>
+</resources>
