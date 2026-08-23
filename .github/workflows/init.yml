@@ -19,6 +19,14 @@ on:
         options:
           - kotlin
           - java
+      gradle_dsl:
+        description: 'Gradle Build Script Language'
+        required: true
+        default: 'kts'
+        type: choice
+        options:
+          - kts
+          - groovy
       min_sdk:
         description: 'Minimum SDK Level'
         required: true
@@ -91,11 +99,25 @@ permissions:
   contents: write
   repository-projects: write
 
+env:
+  GRADLE_VERSION: '8.4'
+  ANDROID_GRADLE_PLUGIN: '8.1.0'
+  KOTLIN_VERSION: '1.9.10'
+  ANDROIDX_CORE: '1.12.0'
+  ANDROIDX_APPCOMPAT: '1.6.1'
+  MATERIAL_VERSION: '1.9.0'
+  CONSTRAINT_LAYOUT: '2.1.4'
+
 jobs:
   create-project:
     runs-on: ubuntu-latest
+    environment: production
 
     steps:
+      # ============================================================================
+      # SETUP & VALIDATION
+      # ============================================================================
+      
       - name: Checkout repository
         uses: actions/checkout@v3
 
@@ -106,12 +128,14 @@ jobs:
           java-version: ${{ github.event.inputs.jdk_version }}
 
       - name: Validate Inputs
+        id: validate
         run: |
           echo "🔍 Validating project configuration..."
           
           # Validate package name format
           if ! [[ "${{ github.event.inputs.package_name }}" =~ ^[a-z][a-z0-9]*(\.[a-z0-9]+)*$ ]]; then
             echo "❌ Invalid package name format!"
+            echo "Must start with lowercase letter and contain only lowercase letters, numbers, and dots"
             exit 1
           fi
           
@@ -124,56 +148,104 @@ jobs:
             exit 1
           fi
           
-          echo "✅ All validations passed!"
+          echo "✅ Package name format: Valid"
+          echo "✅ SDK configuration: Valid"
+          echo "validation_passed=true" >> $GITHUB_OUTPUT
 
-      - name: Display Project Configuration
+      - name: Display Configuration
         run: |
           echo ""
-          echo "╔════════════════════════════════════════╗"
-          echo "║     ANDROID PROJECT CONFIGURATION     ║"
-          echo "╚════════════════════════════════════════╝"
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║        ANDROID PROJECT INITIALIZATION CONFIGURATION        ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
           echo ""
-          echo "📱 Project Details:"
-          echo "   Name: ${{ github.event.inputs.project_name }}"
-          echo "   Package: ${{ github.event.inputs.package_name }}"
-          echo "   Description: ${{ github.event.inputs.app_description }}"
+          echo "📱 PROJECT DETAILS"
+          echo "────────────────────────────────────────────────────────────"
+          echo "  Name:        ${{ github.event.inputs.project_name }}"
+          echo "  Package:     ${{ github.event.inputs.package_name }}"
+          echo "  Description: ${{ github.event.inputs.app_description }}"
           echo ""
-          echo "🛠️  Build Configuration:"
-          echo "   Language: ${{ github.event.inputs.language }}"
-          echo "   JDK Version: ${{ github.event.inputs.jdk_version }}"
-          echo "   Min SDK: ${{ github.event.inputs.min_sdk }}"
-          echo "   Target SDK: ${{ github.event.inputs.target_sdk }}"
+          echo "🛠️  BUILD CONFIGURATION"
+          echo "────────────────────────────────────────────────────────────"
+          echo "  Language:       ${{ github.event.inputs.language }}"
+          echo "  Gradle DSL:     ${{ github.event.inputs.gradle_dsl }}"
+          echo "  JDK Version:    ${{ github.event.inputs.jdk_version }}"
+          echo "  Min SDK:        ${{ github.event.inputs.min_sdk }}"
+          echo "  Target SDK:     ${{ github.event.inputs.target_sdk }}"
           echo ""
-          echo "👤 Author Information:"
-          echo "   Author: ${{ github.event.inputs.author_name }}"
-          echo "   Domain: ${{ github.event.inputs.company_domain }}"
+          echo "👤 AUTHOR INFORMATION"
+          echo "────────────────────────────────────────────────────────────"
+          echo "  Author:  ${{ github.event.inputs.author_name }}"
+          echo "  Domain:  ${{ github.event.inputs.company_domain }}"
           echo ""
+
+      # ============================================================================
+      # DIRECTORY STRUCTURE
+      # ============================================================================
 
       - name: Create Directory Structure
         run: |
-          # Convert package name to path
           PACKAGE_PATH=$(echo "${{ github.event.inputs.package_name }}" | tr '.' '/')
           
-          # Create main directories
+          echo "📁 Creating directory structure..."
+          
+          # Source directories
           mkdir -p app/src/main/java/$PACKAGE_PATH
-          mkdir -p app/src/main/res/layout
-          mkdir -p app/src/main/res/values
-          mkdir -p app/src/main/res/drawable
-          mkdir -p app/src/main/res/mipmap-mdpi
-          mkdir -p app/src/main/res/mipmap-hdpi
-          mkdir -p app/src/main/res/mipmap-xhdpi
-          mkdir -p app/src/main/res/mipmap-xxhdpi
-          mkdir -p app/src/main/res/mipmap-xxxhdpi
-          mkdir -p app/src/androidTest/java/$PACKAGE_PATH
+          mkdir -p app/src/main/res/{layout,values,drawable,mipmap-mdpi,mipmap-hdpi,mipmap-xhdpi,mipmap-xxhdpi,mipmap-xxxhdpi}
           mkdir -p app/src/test/java/$PACKAGE_PATH
+          mkdir -p app/src/androidTest/java/$PACKAGE_PATH
+          
+          # Build directories
+          mkdir -p gradle/wrapper
           mkdir -p .github/workflows
           
-          echo "📁 Directory structure created!"
+          echo "✅ Directory structure created successfully"
 
-      - name: Generate build.gradle (Project Level)
+      # ============================================================================
+      # GRADLE FILES (ROOT LEVEL)
+      # ============================================================================
+
+      - name: Generate build.gradle (Root Level)
         run: |
-          cat > build.gradle << 'EOF'
-          // Top-level build file where you can add configuration options common to all sub-projects/modules.
+          echo "Generating build.gradle (root level) with DSL: ${{ github.event.inputs.gradle_dsl }}"
+          
+          if [ "${{ github.event.inputs.gradle_dsl }}" == "kts" ]; then
+            cat > build.gradle.kts << 'EOFKTS'
+          // Top-level build file
+          // Plugins and dependencies common to all modules
+          
+          buildscript {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath("com.android.tools.build:gradle:8.1.0")
+                  classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.10")
+              }
+          }
+
+          plugins {
+              id("com.android.application") version "8.1.0" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.10" apply false
+          }
+
+          allprojects {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
+          tasks.register<Delete>("clean") {
+              delete(rootProject.buildDir)
+          }
+          EOFKTS
+          else
+            cat > build.gradle << 'EOFGROOVY'
+          // Top-level build file
+          // Plugins and dependencies common to all modules
+          
           buildscript {
               repositories {
                   google()
@@ -200,12 +272,17 @@ jobs:
           task clean(type: Delete) {
               delete rootProject.buildDir
           }
-          EOF
-          echo "✅ build.gradle (project) generated"
+          EOFGROOVY
+          fi
+          
+          echo "✅ build.gradle${{ github.event.inputs.gradle_dsl == 'kts' && '.kts' || '' }} (root) generated"
 
       - name: Generate settings.gradle
         run: |
-          cat > settings.gradle << 'EOF'
+          echo "Generating settings.gradle with DSL: ${{ github.event.inputs.gradle_dsl }}"
+          
+          if [ "${{ github.event.inputs.gradle_dsl }}" == "kts" ]; then
+            cat > settings.gradle.kts << 'EOFKTS'
           pluginManagement {
               repositories {
                   google()
@@ -213,6 +290,7 @@ jobs:
                   gradlePluginPortal()
               }
           }
+
           dependencyResolutionManagement {
               repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
               repositories {
@@ -220,47 +298,140 @@ jobs:
                   mavenCentral()
               }
           }
-          EOF
-          echo "rootProject.name = \"${{ github.event.inputs.project_name }}\"" >> settings.gradle
-          echo "include ':app'" >> settings.gradle
-          echo "✅ settings.gradle generated"
+
+          rootProject.name = "${{ github.event.inputs.project_name }}"
+          include(":app")
+          EOFKTS
+          else
+            cat > settings.gradle << 'EOFGROOVY'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
+          rootProject.name = "${{ github.event.inputs.project_name }}"
+          include ':app'
+          EOFGROOVY
+          fi
+          
+          echo "✅ settings.gradle${{ github.event.inputs.gradle_dsl == 'kts' && '.kts' || '' }} generated"
 
       - name: Generate gradle.properties
         run: |
           cat > gradle.properties << 'EOF'
+          # Project-wide Gradle settings
           org.gradle.jvmargs=-Xmx2048m -XX:MaxPermSize=512m
           org.gradle.parallel=true
           org.gradle.daemon=true
+          
+          # Android configuration
           android.useAndroidX=true
           android.enableJetifier=true
+          
+          # Kotlin configuration
+          kotlin.code.style=official
           EOF
+          
           echo "✅ gradle.properties generated"
 
       - name: Generate app/build.gradle
         run: |
-          if [ "${{ github.event.inputs.language }}" == "kotlin" ]; then
-            PLUGINS="id 'com.android.application'
-              id 'kotlin-android'"
-            KOTLIN_OPTIONS="kotlinOptions {
-                  jvmTarget = '${{ github.event.inputs.jdk_version }}' == '8' ? '1.8' : '${{ github.event.inputs.jdk_version }}'"
-          else
-            PLUGINS="id 'com.android.application'"
-            KOTLIN_OPTIONS=""
-          fi
-
-          cat > app/build.gradle << EOF
+          echo "Generating app/build.gradle with DSL: ${{ github.event.inputs.gradle_dsl }}"
+          
+          if [ "${{ github.event.inputs.gradle_dsl }}" == "kts" ]; then
+            cat > app/build.gradle.kts << 'EOFKTS'
           plugins {
-              $PLUGINS
+              id("com.android.application")
+              id("kotlin-android")
+          }
+
+          android {
+              namespace = "${{ github.event.inputs.package_name }}"
+              compileSdk = 35
+
+              defaultConfig {
+                  applicationId = "${{ github.event.inputs.package_name }}"
+                  minSdk = ${{ github.event.inputs.min_sdk }}
+                  targetSdk = 35
+                  versionCode = 1
+                  versionName = "1.0.0"
+
+                  testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+              }
+
+              buildTypes {
+                  getByName("release") {
+                      isMinifyEnabled = false
+                      proguardFiles(
+                          getDefaultProguardFile("proguard-android-optimize.txt"),
+                          "proguard-rules.pro"
+                      )
+                      signingConfig = signingConfigs.getByName("release")
+                  }
+                  getByName("debug") {
+                      isDebuggable = true
+                      signingConfig = signingConfigs.getByName("debug")
+                  }
+              }
+
+              signingConfigs {
+                  create("release") {
+                      storeFile = file("release.jks")
+                      storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+                      keyAlias = System.getenv("KEYSTORE_ALIAS") ?: ""
+                      keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+                  }
+              }
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_${{ github.event.inputs.jdk_version }}
+                  targetCompatibility = JavaVersion.VERSION_${{ github.event.inputs.jdk_version }}
+              }
+
+              kotlinOptions {
+                  jvmTarget = "${{ github.event.inputs.jdk_version == '8' && '1.8' || github.event.inputs.jdk_version }}"
+              }
+          }
+
+          dependencies {
+              // AndroidX
+              implementation("androidx.core:core-ktx:1.12.0")
+              implementation("androidx.appcompat:appcompat:1.6.1")
+              implementation("com.google.android.material:material:1.9.0")
+              implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+              
+              // Testing
+              testImplementation("junit:junit:4.13.2")
+              androidTestImplementation("androidx.test.ext:junit:1.1.5")
+              androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
+          }
+          EOFKTS
+          else
+            cat > app/build.gradle << 'EOFGROOVY'
+          plugins {
+              id 'com.android.application'
+              id 'kotlin-android'
           }
 
           android {
               namespace '${{ github.event.inputs.package_name }}'
-              compileSdk ${{ github.event.inputs.target_sdk }}
+              compileSdk 35
 
               defaultConfig {
                   applicationId "${{ github.event.inputs.package_name }}"
                   minSdk ${{ github.event.inputs.min_sdk }}
-                  targetSdk ${{ github.event.inputs.target_sdk }}
+                  targetSdk 35
                   versionCode 1
                   versionName "1.0.0"
 
@@ -292,26 +463,50 @@ jobs:
                   sourceCompatibility JavaVersion.VERSION_${{ github.event.inputs.jdk_version }}
                   targetCompatibility JavaVersion.VERSION_${{ github.event.inputs.jdk_version }}
               }
-              $KOTLIN_OPTIONS
+
+              kotlinOptions {
+                  jvmTarget = '${{ github.event.inputs.jdk_version == '8' && '1.8' || github.event.inputs.jdk_version }}'
+              }
           }
 
           dependencies {
+              // AndroidX
               implementation 'androidx.core:core-ktx:1.12.0'
               implementation 'androidx.appcompat:appcompat:1.6.1'
               implementation 'com.google.android.material:material:1.9.0'
               implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
               
+              // Testing
               testImplementation 'junit:junit:4.13.2'
               androidTestImplementation 'androidx.test.ext:junit:1.1.5'
               androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
           }
+          EOFGROOVY
+          fi
+          
+          echo "✅ app/build.gradle${{ github.event.inputs.gradle_dsl == 'kts' && '.kts' || '' }} generated"
+
+      - name: Generate gradle wrapper properties
+        run: |
+          mkdir -p gradle/wrapper
+          
+          cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.4-bin.zip
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          networkTimeout=10000
           EOF
-          echo "✅ app/build.gradle generated"
+          
+          echo "✅ Gradle wrapper configured"
+
+      # ============================================================================
+      # ANDROID MANIFEST & RESOURCES
+      # ============================================================================
 
       - name: Generate AndroidManifest.xml
         run: |
-          PACKAGE_PATH=$(echo "${{ github.event.inputs.package_name }}" | tr '.' '/')
-          
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -327,7 +522,8 @@ jobs:
 
                   <activity
                       android:name=".MainActivity"
-                      android:exported="true">
+                      android:exported="true"
+                      android:label="@string/app_name">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
@@ -338,19 +534,22 @@ jobs:
 
           </manifest>
           EOF
+          
           echo "✅ AndroidManifest.xml generated"
 
-      - name: Generate strings.xml
+      - name: Generate String Resources
         run: |
           cat > app/src/main/res/values/strings.xml << 'EOF'
           <resources>
               <string name="app_name">${{ github.event.inputs.project_name }}</string>
               <string name="app_description">${{ github.event.inputs.app_description }}</string>
+              <string name="hello">Hello World!</string>
           </resources>
           EOF
+          
           echo "✅ strings.xml generated"
 
-      - name: Generate colors.xml
+      - name: Generate Color Resources
         run: |
           cat > app/src/main/res/values/colors.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -364,9 +563,10 @@ jobs:
               <color name="white">#FFFFFFFF</color>
           </resources>
           EOF
+          
           echo "✅ colors.xml generated"
 
-      - name: Generate styles.xml
+      - name: Generate Style Resources
         run: |
           cat > app/src/main/res/values/styles.xml << 'EOF'
           <resources>
@@ -377,7 +577,12 @@ jobs:
               </style>
           </resources>
           EOF
+          
           echo "✅ styles.xml generated"
+
+      # ============================================================================
+      # SOURCE CODE
+      # ============================================================================
 
       - name: Generate MainActivity (Kotlin)
         if: github.event.inputs.language == 'kotlin'
@@ -396,11 +601,16 @@ jobs:
                   super.onCreate(savedInstanceState)
                   setContentView(R.layout.activity_main)
                   
-                  val textView = findViewById<TextView>(R.id.welcomeText)
-                  textView.text = "Welcome to ${{ github.event.inputs.project_name }}"
+                  setupUI()
+              }
+
+              private fun setupUI() {
+                  val welcomeText = findViewById<TextView>(R.id.welcomeText)
+                  welcomeText.text = "Welcome to ${{ github.event.inputs.project_name }}"
               }
           }
           EOF
+          
           echo "✅ MainActivity.kt generated"
 
       - name: Generate MainActivity (Java)
@@ -421,14 +631,19 @@ jobs:
                   super.onCreate(savedInstanceState);
                   setContentView(R.layout.activity_main);
                   
-                  TextView textView = findViewById(R.id.welcomeText);
-                  textView.setText("Welcome to ${{ github.event.inputs.project_name }}");
+                  setupUI();
+              }
+
+              private void setupUI() {
+                  TextView welcomeText = findViewById(R.id.welcomeText);
+                  welcomeText.setText("Welcome to ${{ github.event.inputs.project_name }}");
               }
           }
           EOF
+          
           echo "✅ MainActivity.java generated"
 
-      - name: Generate activity_main.xml
+      - name: Generate Activity Layout
         run: |
           cat > app/src/main/res/layout/activity_main.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -444,6 +659,7 @@ jobs:
                   android:id="@+id/welcomeText"
                   android:layout_width="match_parent"
                   android:layout_height="wrap_content"
+                  android:text="@string/hello"
                   android:textSize="24sp"
                   android:textStyle="bold"
                   android:textAlignment="center"
@@ -451,7 +667,12 @@ jobs:
 
           </LinearLayout>
           EOF
+          
           echo "✅ activity_main.xml generated"
+
+      # ============================================================================
+      # CONFIGURATION FILES
+      # ============================================================================
 
       - name: Generate .gitignore
         run: |
@@ -462,6 +683,7 @@ jobs:
           *.apk
           *.ap_
           *.dex
+          *.class
 
           # Local configuration file
           local.properties
@@ -483,218 +705,351 @@ jobs:
           .externalNativeBuild
           .cxx/
           *.iml
+          .DS_Store
 
           # OS files
           .DS_Store
           Thumbs.db
+          *.log
 
           # Secrets
           .env
           secrets.properties
+          local.properties
           EOF
+          
           echo "✅ .gitignore generated"
 
-      - name: Generate proguard-rules.pro
+      - name: Generate ProGuard Rules
         run: |
           cat > app/proguard-rules.pro << 'EOF'
           # Add project specific ProGuard rules here.
           # By default, the flags in this file are appended to flags specified
           # in the SDK location with the following values:
+          #target=android-35
+          #min sdk version=9
+          #target sdk version=35
+
+          # Keep application classes
           -keep class ${{ github.event.inputs.package_name }}.** { *; }
 
           # Keep native methods
           -keepclasseswithmembernames class * {
               native <methods>;
           }
+
+          # Keep enums
+          -keepclassmembers enum * {
+              public static **[] values();
+              public static ** valueOf(java.lang.String);
+          }
+
+          # Preserve line numbers for stack traces
+          -keepattributes SourceFile,LineNumberTable
+          -renamesourcefileattribute SourceFile
           EOF
+          
           echo "✅ proguard-rules.pro generated"
 
       - name: Generate README.md
         run: |
+          GRADLE_EXT="${{ github.event.inputs.gradle_dsl == 'kts' && '.kts' || '' }}"
+          MAIN_CLASS="${{ github.event.inputs.language == 'kotlin' && 'MainActivity.kt' || 'MainActivity.java' }}"
+          
           cat > README.md << 'EOF'
           # ${{ github.event.inputs.project_name }}
 
           ${{ github.event.inputs.app_description }}
 
-          ## Project Information
+          ## 📋 Project Information
 
-          - **Package Name:** ${{ github.event.inputs.package_name }}
-          - **Language:** ${{ github.event.inputs.language }}
-          - **JDK Version:** ${{ github.event.inputs.jdk_version }}
-          - **Min SDK:** ${{ github.event.inputs.min_sdk }}
-          - **Target SDK:** ${{ github.event.inputs.target_sdk }}
-          - **Author:** ${{ github.event.inputs.author_name }}
-          - **Company:** ${{ github.event.inputs.company_domain }}
+          | Property | Value |
+          |----------|-------|
+          | **Package Name** | `${{ github.event.inputs.package_name }}` |
+          | **Language** | ${{ github.event.inputs.language }} |
+          | **Gradle DSL** | ${{ github.event.inputs.gradle_dsl }} |
+          | **JDK Version** | ${{ github.event.inputs.jdk_version }} |
+          | **Min SDK** | ${{ github.event.inputs.min_sdk }} (Android API Level) |
+          | **Target SDK** | 35 (Android 15) |
+          | **Author** | ${{ github.event.inputs.author_name }} |
+          | **Company** | ${{ github.event.inputs.company_domain }} |
 
-          ## Getting Started
+          ## 🛠️ Build Tools & Dependencies
 
-          ### Build Locally
+          - **Gradle:** 8.4
+          - **Android Gradle Plugin:** 8.1.0
+          - **Kotlin:** 1.9.10
+          - **AndroidX Core KTX:** 1.12.0
+          - **AppCompat:** 1.6.1
+          - **Material Design:** 1.9.0
+          - **ConstraintLayout:** 2.1.4
+
+          ## 🚀 Getting Started
+
+          ### Prerequisites
+          - JDK ${{ github.event.inputs.jdk_version }} or higher installed
+          - Android SDK with minimum API level ${{ github.event.inputs.min_sdk }} 
+          - Android Studio or equivalent IDE
+          - Gradle 8.4
+
+          ### Clone & Setup
           ```bash
+          git clone <repository-url>
+          cd ${{ github.event.inputs.project_name }}
+          ```
+
+          ### Build
+          ```bash
+          # Debug build
           ./gradlew build
-          ```
 
-          ### Run on Device/Emulator
-          ```bash
-          ./gradlew installDebug
-          ```
-
-          ### Build Release APK
-          ```bash
+          # Release build (requires keystore)
           ./gradlew assembleRelease
           ```
 
-          ## Project Structure
+          ### Run
+          ```bash
+          # Install debug APK on device/emulator
+          ./gradlew installDebug
+
+          # Run with log output
+          ./gradlew installDebugRunTests
+          ```
+
+          ## 📦 Project Structure
 
           ```
           ${{ github.event.inputs.project_name }}/
           ├── app/
-          │   ├── src/main/
-          │   │   ├── java/${{ github.event.inputs.package_name }}/
-          │   │   │   └── MainActivity.${{ github.event.inputs.language == 'kotlin' && 'kt' || 'java' }}
-          │   │   └── res/
-          │   │       ├── layout/
-          │   │       ├── values/
-          │   │       └── drawable/
-          │   └── build.gradle
-          ├── build.gradle
-          ├── settings.gradle
+          │   ├── src/
+          │   │   ├── main/
+          │   │   │   ├── java/${{ github.event.inputs.package_name }}/
+          │   │   │   │   └── MainActivity.${{ github.event.inputs.language == 'kotlin' && 'kt' || 'java' }}
+          │   │   │   ├── res/
+          │   │   │   │   ├── layout/
+          │   │   │   │   │   └── activity_main.xml
+          │   │   │   │   ├── values/
+          │   │   │   │   │   ├── strings.xml
+          │   │   │   │   │   ├── colors.xml
+          │   │   │   │   │   └── styles.xml
+          │   │   │   │   └── drawable/
+          │   │   │   └── AndroidManifest.xml
+          │   │   ├── test/
+          │   │   │   └── java/${{ github.event.inputs.package_name }}/
+          │   │   └── androidTest/
+          │   │       └── java/${{ github.event.inputs.package_name }}/
+          │   ├── build.gradle$GRADLE_EXT
+          │   └── proguard-rules.pro
+          ├── gradle/
+          │   └── wrapper/
+          │       └── gradle-wrapper.properties
+          ├── build.gradle$GRADLE_EXT
+          ├── settings.gradle$GRADLE_EXT
+          ├── gradle.properties
+          ├── .gitignore
           └── README.md
           ```
 
-          ## License
+          ## 📚 Common Commands
 
-          Copyright (c) 2024 ${{ github.event.inputs.author_name }}
+          ```bash
+          # Build commands
+          ./gradlew build              # Full build
+          ./gradlew assembleDebug      # Build debug APK
+          ./gradlew assembleRelease    # Build release APK
+          ./gradlew clean build        # Clean and build
 
+          # Testing
+          ./gradlew test               # Run unit tests
+          ./gradlew connectedTest      # Run instrumented tests
+
+          # Install & Run
+          ./gradlew installDebug       # Install debug APK
+          ./gradlew installDebugRunTests # Install and run tests
+
+          # Dependency management
+          ./gradlew dependencies       # Show dependency tree
+          ./gradlew dependencyInsight  # Analyze specific dependency
+
+          # Gradle wrapper
+          ./gradlew wrapper --gradle-version 8.4 # Update wrapper
+          ```
+
+          ## 🔐 Signing & Release
+
+          For release builds, you need to configure signing:
+
+          1. **Generate Keystore** (if not exists):
+             ```bash
+             keytool -genkey -v -keystore release.jks \
+               -keyalg RSA -keysize 2048 -validity 10000 \
+               -alias ${{ github.event.inputs.author_name }}
+             ```
+
+          2. **Configure Signing** in `app/build.gradle`:
+             ```gradle
+             signingConfigs {
+                 release {
+                     storeFile = file("../release.jks")
+                     storePassword = "your_password"
+                     keyAlias = "your_alias"
+                     keyPassword = "your_key_password"
+                 }
+             }
+             ```
+
+          3. **Build Release APK**:
+             ```bash
+             ./gradlew assembleRelease
+             ```
+
+          ## 🧪 Testing
+
+          ### Unit Tests
+          ```bash
+          ./gradlew test
+          ```
+
+          ### Instrumented Tests (on device/emulator)
+          ```bash
+          ./gradlew connectedAndroidTest
+          ```
+
+          ## 📋 Development Guidelines
+
+          - Follow official Kotlin code style guidelines
+          - Use meaningful variable and function names
+          - Add comments for complex logic
+          - Write tests for critical functionality
+          - Keep ProGuard rules updated
+
+          ## 🔗 Useful Resources
+
+          - [Android Developer Documentation](https://developer.android.com/)
+          - [Kotlin Documentation](https://kotlinlang.org/docs/)
+          - [AndroidX Library](https://developer.android.com/jetpack)
+          - [Material Design](https://material.io/)
+
+          ## 📝 License
+
+          Copyright © 2024 ${{ github.event.inputs.author_name }}
+          
           All rights reserved.
+
+          ---
+
+          **Created:** 2024-${{ github.run_number }}  
+          **Language:** ${{ github.event.inputs.language }}  
+          **Gradle DSL:** ${{ github.event.inputs.gradle_dsl }}
           EOF
+          
           echo "✅ README.md generated"
 
-      - name: Generate gradle wrapper
-        run: |
-          # Create gradle wrapper files
-          mkdir -p gradle/wrapper
-          
-          cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
-          distributionBase=GRADLE_USER_HOME
-          distributionPath=wrapper/dists
-          distributionUrl=https\://services.gradle.org/distributions/gradle-8.4-bin.zip
-          zipStoreBase=GRADLE_USER_HOME
-          zipStorePath=wrapper/dists
-          EOF
-          
-          echo "✅ gradle wrapper configured"
+      # ============================================================================
+      # GIT COMMIT & PUSH
+      # ============================================================================
 
-      - name: Create Summary File
-        run: |
-          cat > PROJECT_SUMMARY.txt << 'EOF'
-          ╔════════════════════════════════════════════════════════════╗
-          ║          ANDROID PROJECT CREATED SUCCESSFULLY             ║
-          ╚════════════════════════════════════════════════════════════╝
-
-          📱 PROJECT CONFIGURATION
-          ────────────────────────────────────────────────────────────
-          Project Name:      ${{ github.event.inputs.project_name }}
-          Package Name:      ${{ github.event.inputs.package_name }}
-          Description:       ${{ github.event.inputs.app_description }}
-
-          🛠️  BUILD CONFIGURATION
-          ────────────────────────────────────────────────────────────
-          Language:          ${{ github.event.inputs.language }}
-          JDK Version:       ${{ github.event.inputs.jdk_version }}
-          Min SDK:           ${{ github.event.inputs.min_sdk }}
-          Target SDK:        ${{ github.event.inputs.target_sdk }}
-
-          👤 DEVELOPER INFORMATION
-          ────────────────────────────────────────────────────────────
-          Author:            ${{ github.event.inputs.author_name }}
-          Company Domain:    ${{ github.event.inputs.company_domain }}
-
-          📦 GENERATED FILES
-          ────────────────────────────────────────────────────────────
-          ✅ build.gradle (project level)
-          ✅ settings.gradle
-          ✅ gradle.properties
-          ✅ app/build.gradle
-          ✅ app/src/main/AndroidManifest.xml
-          ✅ app/src/main/java/.../MainActivity.${{ github.event.inputs.language == 'kotlin' && 'kt' || 'java' }}
-          ✅ app/src/main/res/layout/activity_main.xml
-          ✅ app/src/main/res/values/strings.xml
-          ✅ app/src/main/res/values/colors.xml
-          ✅ app/src/main/res/values/styles.xml
-          ✅ app/proguard-rules.pro
-          ✅ .gitignore
-          ✅ README.md
-
-          🚀 NEXT STEPS
-          ────────────────────────────────────────────────────────────
-          1. Review generated project structure
-          2. Customize MainActivity and layouts as needed
-          3. Add more dependencies to app/build.gradle if needed
-          4. Run: ./gradlew build
-          5. Test: ./gradlew installDebug
-          6. Deploy: Use setup-keystore.yml workflow for release builds
-
-          📚 USEFUL COMMANDS
-          ────────────────────────────────────────────────────────────
-          Build Debug APK:     ./gradlew assembleDebug
-          Build Release APK:   ./gradlew assembleRelease
-          Run Tests:           ./gradlew test
-          Install on Device:   ./gradlew installDebug
-          Check Dependencies:  ./gradlew dependencies
-
-          ════════════════════════════════════════════════════════════
-          Ready to start development! Happy coding! 🎉
-          ════════════════════════════════════════════════════════════
-          EOF
-          cat PROJECT_SUMMARY.txt
-
-      - name: Cleanup Temporary Files
-        run: |
-          rm -f PROJECT_SUMMARY.txt
-
-      - name: Project Creation Complete
-        run: |
-          echo "✅ Android project '${{ github.event.inputs.project_name }}' created successfully!"
-          echo ""
-          echo "📋 Configuration Summary:"
-          echo "   Language: ${{ github.event.inputs.language }}"
-          echo "   JDK: ${{ github.event.inputs.jdk_version }}"
-          echo "   SDK Range: ${{ github.event.inputs.min_sdk }} - ${{ github.event.inputs.target_sdk }}"
-          echo ""
-          echo "📁 Files generated and ready for review"
-          echo "🎉 You can now customize and develop your app!"
-         
-      - name: Commit and Push to Repository
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Configure Git
         run: |
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
-          
+          echo "✅ Git configured"
+
+      - name: Commit and Push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
           git add -A
           
           if git diff --cached --quiet; then
-            echo "No changes to commit"
+            echo "ℹ️  No changes to commit"
           else
-            git commit -m "chore: Initialize Android Project
+            git commit -m "chore: Initialize Android Project - ${{ github.event.inputs.project_name }}
 
-          Project: ${{ github.event.inputs.project_name }}
-          Package: ${{ github.event.inputs.package_name }}
-          Language: ${{ github.event.inputs.language }}
-          JDK: ${{ github.event.inputs.jdk_version }}
-          SDK Range: ${{ github.event.inputs.min_sdk }} - ${{ github.event.inputs.target_sdk }}
-          Author: ${{ github.event.inputs.author_name }}"
+          📱 PROJECT
+          - Name: ${{ github.event.inputs.project_name }}
+          - Package: ${{ github.event.inputs.package_name }}
+          - Description: ${{ github.event.inputs.app_description }}
+
+          🛠️  BUILD
+          - Language: ${{ github.event.inputs.language }}
+          - Gradle DSL: ${{ github.event.inputs.gradle_dsl }}
+          - JDK: ${{ github.event.inputs.jdk_version }}
+          - SDK: ${{ github.event.inputs.min_sdk }}-35
+
+          👤 AUTHOR
+          - Name: ${{ github.event.inputs.author_name }}
+          - Domain: ${{ github.event.inputs.company_domain }}"
             
             git push https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git HEAD:${{ github.ref }}
+            
+            echo "✅ Changes committed and pushed successfully"
           fi
+
+      # ============================================================================
+      # SUMMARY
+      # ============================================================================
 
       - name: Project Creation Summary
         run: |
-          echo "✅ Project created successfully!"
           echo ""
-          echo "📋 Project Details:"
-          echo "   Name: ${{ github.event.inputs.project_name }}"
-          echo "   Package: ${{ github.event.inputs.package_name }}"
-          echo "   Language: ${{ github.event.inputs.language }}"
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║     ✅ ANDROID PROJECT CREATED SUCCESSFULLY               ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
           echo ""
-          echo "✔️ All files committed and pushed to repository"
+          echo "📱 PROJECT DETAILS"
+          echo "────────────────────────────────────────────────────────────"
+          echo "  Name:        ${{ github.event.inputs.project_name }}"
+          echo "  Package:     ${{ github.event.inputs.package_name }}"
+          echo "  Description: ${{ github.event.inputs.app_description }}"
+          echo ""
+          echo "🛠️  BUILD CONFIGURATION"
+          echo "────────────────────────────────────────────────────────────"
+          echo "  Language:       ${{ github.event.inputs.language }}"
+          echo "  Gradle DSL:     ${{ github.event.inputs.gradle_dsl }}"
+          echo "  JDK:            ${{ github.event.inputs.jdk_version }}"
+          echo "  SDK Range:      ${{ github.event.inputs.min_sdk }} - 35"
+          echo ""
+          echo "👤 AUTHOR INFORMATION"
+          echo "────────────────────────────────────────────────────────────"
+          echo "  Author:  ${{ github.event.inputs.author_name }}"
+          echo "  Domain:  ${{ github.event.inputs.company_domain }}"
+          echo ""
+          echo "📦 GENERATED FILES"
+          echo "────────────────────────────────────────────────────────────"
+          echo "  ✅ build.gradle${{ github.event.inputs.gradle_dsl == 'kts' && '.kts' || '' }} (root)"
+          echo "  ✅ settings.gradle${{ github.event.inputs.gradle_dsl == 'kts' && '.kts' || '' }}"
+          echo "  ✅ gradle.properties"
+          echo "  ✅ app/build.gradle${{ github.event.inputs.gradle_dsl == 'kts' && '.kts' || '' }}"
+          echo "  ✅ app/src/main/AndroidManifest.xml"
+          echo "  ✅ app/src/main/java/.../MainActivity.${{ github.event.inputs.language == 'kotlin' && 'kt' || 'java' }}"
+          echo "  ✅ app/src/main/res/layout/activity_main.xml"
+          echo "  ✅ app/src/main/res/values/strings.xml"
+          echo "  ✅ app/src/main/res/values/colors.xml"
+          echo "  ✅ app/src/main/res/values/styles.xml"
+          echo "  ✅ app/proguard-rules.pro"
+          echo "  ✅ gradle/wrapper/gradle-wrapper.properties"
+          echo "  ✅ .gitignore"
+          echo "  ✅ README.md"
+          echo ""
+          echo "🚀 NEXT STEPS"
+          echo "────────────────────────────────────────────────────────────"
+          echo "  1. Review the generated project structure"
+          echo "  2. Customize MainActivity and layouts as needed"
+          echo "  3. Add dependencies to app/build.gradle"
+          echo "  4. Build locally: ./gradlew build"
+          echo "  5. Install debug: ./gradlew installDebug"
+          echo "  6. Use build-apk.yml for automated builds"
+          echo ""
+          echo "📚 USEFUL COMMANDS"
+          echo "────────────────────────────────────────────────────────────"
+          echo "  ./gradlew build              (Full build)"
+          echo "  ./gradlew assembleDebug      (Debug APK)"
+          echo "  ./gradlew assembleRelease    (Release APK)"
+          echo "  ./gradlew test               (Unit tests)"
+          echo "  ./gradlew installDebug       (Install to device)"
+          echo "  ./gradlew dependencies       (View dependencies)"
+          echo ""
+          echo "════════════════════════════════════════════════════════════"
+          echo "🎉 Ready to start development! Happy coding! 🎉"
+          echo "════════════════════════════════════════════════════════════"
